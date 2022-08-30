@@ -447,22 +447,11 @@ SS <- data %>%
 dim(SS) #88 samples with Perch eDNA
 
 SS <- data %>%
-  filter(Binary_Perch_ddPCR >0) %>%
-  distinct(Site, Lake)
-
-dim(SS) #29 sites with Perch eDNA
-
-SS <- data %>%
   filter(Binary_Rudd_ddPCR >0) %>%
   distinct(Sample.ID,Site, Lake)
 
 dim(SS) #46 samples with Rudd eDNA
 
-SS <- data %>%
-  filter(Binary_Rudd_ddPCR >0) %>%
-  distinct(Site, Lake)
-
-dim(SS) #21 sites with Rudd eDNA
 
 
 
