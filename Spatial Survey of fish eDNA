@@ -16,21 +16,20 @@ Sample types sampled in duplicate (two water and two sediment per site).
 Sites belong to one of two location category: near-shore or mid-lake
 
 Goals of this study:
- + Optimise eDNA assays to detect fish in lakes
+ + Optimise two species-specific (perch, rudd) eDNA assays to detect fish in lakes
  + Compare detection between surface sediment and surface water samples
- +     “		                 near-shore and mid-lake sites
+ +     “		                   near-shore and mid-lake sites
  + Will detection change depending on the type of fish (rudd = benthic vs perch = pelagic)?
  + Determine which sampling strategy is better (sediment or water, near-shore or mid-lake, anything?)
  + How many sites/replicates per lake to accurately detect a species?
  
  
- 
 
 
 Hypotheses:
- + eDNA distribution will tend to be homogeneous in all lakes for both species
- + eDNA detection will be more homogenous in water but of low concentration, and more patchy with higher concentrations in sediment samples
- + due to their life histories, rudd will mainly be detected near shores while perch detection will be uniform within the lake.
+ + eDNA distribution will tend to be homogeneous in all lakes for both species,
+ + eDNA detection will be more homogenous in water but of low concentration, and more patchy with higher concentrations in sediment samples.
+
 
 ### Methods
 
@@ -51,6 +50,7 @@ Hypotheses:
 
 ### Data analysis
 
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -60,17 +60,29 @@ knitr::opts_chunk$set(echo = TRUE)
 require(tidyverse)
 require(ggvenn)
 require(scales)
-require(phyloseq)
 require(magrittr)
 require(viridis)
-require(ggsci)
 require(ggpubr)
-require(kableExtra)
+require(ggstar)
 ```
 
 ```{r Data input}
-data <- read.csv(data, "Picard data PeerJ.csv")
+data <- read.csv("ISS data balanced.csv")
+DW <- read.csv("Dry weights ISS.csv") %>% select(8:10) %>% rename(Sediment.Content = Sediment.Content....)
+
+data <- left_join(data, DW, by = c("Lake", "Site"))
 colnames(data)
+
+
+
+data %<>%
+  mutate(Norm_Perch = case_when(
+          SampleType == "Sediment" ~ (Conc.uL_Perch *(22.45/6)*100)/(Sample.Amount.g.mL*Sediment.Content),
+          SampleType == "Water" ~ (Conc.uL_Perch *(22.45/6)*100)/Sample.Amount.g.mL),
+         Norm_Rudd = case_when(
+          SampleType == "Sediment" ~ (Conc.uL_Rudd *(22.45/6)*100)/(Sample.Amount.g.mL*Sediment.Content),
+          SampleType == "Water" ~ (Conc.uL_Rudd *(22.45/6)*100)/Sample.Amount.g.mL))
+
 levels(as.factor(data$Lake))
 #Pounui"     "Tomarata"   "Waitawa" 
 levels(as.factor(data$SampleType))
@@ -82,12 +94,22 @@ levels(as.factor(data$Site))
 
 levels(as.factor(data$Replicate))
 
+write.csv(data, "Picard data PeerJ.csv")
+
 
 data_long <- data %>%
-  select(!c(Conc.uL_Perch:Conc.uL_Rudd)) %>%
-  rename(Perch = Norm_Perch,
-         Rudd = Norm_Rudd) %>%
-  pivot_longer(cols = c(Perch, Rudd), names_to = "Target", values_to = "Norm_Conc")
+  relocate(Location, .after = SampleType) %>%
+  select(!c(Binary_Perch_ddPCR:Counts_Rudd_metaB, Sample.ID:Sediment.Content)) %>%
+  pivot_longer(
+    cols = c(Conc.uL_Perch:Norm_Rudd),
+    names_to = c(".value", "Target"),
+    names_pattern = "(.+)_(.+)") %>%
+  rename(Raw_Conc = Conc.uL,
+         Norm_Conc = Norm,
+         Raw_PoissonConfMin = PoissonConfMin,
+         Raw_PoissonConfMax = PoissonConfMax) %>%
+  mutate(Norm_PoissonConfMin = Raw_PoissonConfMin*Norm_Conc/Raw_Conc,
+         Norm_PoissonConfMax = Raw_PoissonConfMax*Norm_Conc/Raw_Conc)
 
 ```
 
@@ -115,16 +137,16 @@ max(data_long%>%filter(SampleType=="Water")%>%filter(Norm_Conc>0)%>%select(Norm_
 
 #Any differences for perch vs rudd?
 SS <- data_long%>%filter(SampleType=="Sediment")%>%filter(Norm_Conc>0)%>%select(Norm_Conc, Target)
-SS$Target[min(SS$Norm_Conc)]##doesn;t work
-SS$Target[max(SS$Norm_Conc)]
+max(SS$Norm_Conc)
+min(SS$Norm_Conc)
 
 SS <- data_long%>%filter(SampleType=="Water")%>%filter(Norm_Conc>0)%>%select(Norm_Conc, Target)
 max(SS$Norm_Conc)
 min(SS$Norm_Conc)
 
+
+
 #Differences in detection rates depending on sample type for perch
-
-
 cat("In Lake Pounui, sediment samples yielded more detections than water (",
     nrow(data %>% filter(Lake=="Pounui", SampleType=="Sediment", Binary_Perch_ddPCR>0))/28*100
 ,"% detection in sediment vs. ",
@@ -152,23 +174,95 @@ cat("Rudd eDNA was"
 
 
 
-#Stats
+```
+
+```{r Statistical differences}
+
+#All lakes
 
 kruskal.test(log10(Norm_Perch+1) ~ as.factor(Location), data = data %>%
-  drop_na(Norm_Perch))
+  drop_na(Norm_Perch)) #chi-squared = 3.2774, df = 1, p-value = 0.07024
+kruskal.test(log10(Conc.uL_Perch+1) ~ as.factor(Location), data = data %>%
+  drop_na(Conc.uL_Perch)) #chi-squared = 6.4135, df = 1, p-value = 0.01133
 
 kruskal.test(log10(Norm_Perch+1) ~ as.factor(SampleType), data = data %>%
-  drop_na(Norm_Perch))
+  drop_na(Norm_Perch)) #chi-squared = 10.571, df = 1, p-value = 0.001149
+kruskal.test(log10(Conc.uL_Perch+1) ~ as.factor(SampleType), data = data %>%
+  drop_na(Conc.uL_Perch)) #chi-squared = 0.21174, df = 1, p-value = 0.6454
 
 kruskal.test(log10(Norm_Rudd+1) ~ as.factor(Location), data = data %>%
-  drop_na(Norm_Rudd))
+  drop_na(Norm_Rudd)) #chi-squared = 0.21568, df = 1, p-value = 0.6424
+kruskal.test(log10(Conc.uL_Rudd+1) ~ as.factor(Location), data = data %>%
+  drop_na(Conc.uL_Rudd)) #chi-squared = 0.22325, df = 1, p-value = 0.6366
 
 kruskal.test(log10(Norm_Rudd+1) ~ as.factor(SampleType), data = data %>%
-  drop_na(Norm_Rudd))
+  drop_na(Norm_Rudd)) #chi-squared = 0.46029, df = 1, p-value = 0.4975
+kruskal.test(log10(Conc.uL_Rudd+1) ~ as.factor(SampleType), data = data %>%
+  drop_na(Conc.uL_Rudd)) #chi-squared = 5.0961, df = 1, p-value = 0.02398
+
+
+#Pounui
+
+kruskal.test(log10(Norm_Perch+1) ~ as.factor(Location), data = subset(data, Lake %in% "Pounui") %>%
+  drop_na(Norm_Perch)) #chi-squared = 6.9856, df = 1, p-value = 0.008217
+kruskal.test(log10(Conc.uL_Perch+1) ~ as.factor(Location), data = subset(data, Lake %in% "Pounui") %>%
+  drop_na(Conc.uL_Perch)) #chi-squared = 15.296, df = 1, p-value = 9.19e-05
+
+kruskal.test(log10(Norm_Perch+1) ~ as.factor(SampleType), data = subset(data, Lake %in% "Pounui") %>%
+  drop_na(Norm_Perch)) #chi-squared = 32.464, df = 1, p-value = 1.214e-08
+kruskal.test(log10(Conc.uL_Perch+1) ~ as.factor(SampleType), data = subset(data, Lake %in% "Pounui") %>%
+  drop_na(Conc.uL_Perch)) #chi-squared = 3.4017, df = 1, p-value = 0.06513
+
+#So differences concentration due to location, per sample (raw conc) and per unit (norm conc), but only differences in sample type when conc is normalised to units (no difference per sample)
+
+#Tomarata
+
+kruskal.test(log10(Norm_Rudd+1) ~ as.factor(Location), data = subset(data, Lake %in% "Tomarata") %>%
+  drop_na(Norm_Rudd)) #chi-squared = 0.63102, df = 1, p-value = 0.427
+kruskal.test(log10(Conc.uL_Rudd+1) ~ as.factor(Location), data = subset(data, Lake %in% "Tomarata") %>%
+  drop_na(Conc.uL_Rudd)) #chi-squared = 0.86305, df = 1, p-value = 0.3529
+
+kruskal.test(log10(Norm_Rudd+1) ~ as.factor(SampleType), data = subset(data, Lake %in% "Tomarata") %>%
+  drop_na(Norm_Rudd)) #chi-squared = 2.7873, df = 1, p-value = 0.09502
+kruskal.test(log10(Conc.uL_Rudd+1) ~ as.factor(SampleType), data = subset(data, Lake %in% "Tomarata") %>%
+  drop_na(Conc.uL_Rudd)) #chi-squared = 2.3558, df = 1, p-value = 0.1248
+
+#So no differences in eDNA concentrations anywhere
+
+
+#Waitawa
+
+kruskal.test(log10(Norm_Perch+1) ~ as.factor(Location), data = subset(data, Lake %in% "Waitawa") %>%
+  drop_na(Norm_Perch)) #chi-squared = 0.65286, df = 1, p-value = 0.4191
+kruskal.test(log10(Conc.uL_Perch+1) ~ as.factor(Location), data = subset(data, Lake %in% "Waitawa") %>%
+  drop_na(Conc.uL_Perch)) #chi-squared = 6.4135, df = 1, p-value = 0.01133
+
+kruskal.test(log10(Norm_Perch+1) ~ as.factor(SampleType), data = subset(data, Lake %in% "Waitawa") %>%
+  drop_na(Norm_Perch)) #chi-squared = 1.9186, df = 1, p-value = 0.166
+kruskal.test(log10(Conc.uL_Perch+1) ~ as.factor(SampleType), data = subset(data, Lake %in% "Waitawa") %>%
+  drop_na(Conc.uL_Perch)) #6.4486, df = 1, p-value = 0.0111
+
+#Only differences per sample: location and sample type matter for perch eDNA levels per sample
+
+
+kruskal.test(log10(Norm_Rudd+1) ~ as.factor(Location), data = subset(data, Lake %in% "Waitawa") %>%
+  drop_na(Norm_Rudd)) #chi-squared = 2.5329, df = 1, p-value = 0.1115
+kruskal.test(log10(Conc.uL_Rudd+1) ~ as.factor(Location), data = subset(data, Lake %in% "Waitawa") %>%
+  drop_na(Conc.uL_Rudd)) #chi-squared = 1.8447, df = 1, p-value = 0.1744
+
+kruskal.test(log10(Norm_Rudd+1) ~ as.factor(SampleType), data = subset(data, Lake %in% "Waitawa") %>%
+  drop_na(Norm_Rudd)) #0.44436, df = 1, p-value = 0.505
+kruskal.test(log10(Conc.uL_Rudd+1) ~ as.factor(SampleType), data = subset(data, Lake %in% "Waitawa") %>%
+  drop_na(Conc.uL_Rudd)) #chi-squared = 20.699, df = 1, p-value = 5.375e-06
+
+#Only significant difference is in rudd eDNA raw concentration (per sample) depending on the sample type
+
 
 
 
 ```
+
+
 
 
 ```{r Counts boxplots}
@@ -178,9 +272,43 @@ data$SampleType <- as.factor(data$SampleType)
 
 glimpse(data)
 
-require(rstatix)
+#Paired samples boxplots in Waitawa - 2 species - no difference for water samples but difference for sediment
+SS <- data %>% filter(Lake == "Waitawa") %>%
+  pivot_longer(cols = Norm_Perch:Norm_Rudd, names_to = "Target", values_to = "Conc") %>%
+  filter(SampleType == "Water") %>%
+  unite(col = "IDss", c(Site, Replicate), sep = "_", remove = FALSE)
+wilcox.test(Conc~ Target, data = SS, paired = TRUE)
+#V = 162, p-value = 0.03492
 
-##not working anymore?? but super handy...
+SS <- data %>% filter(Lake == "Waitawa") %>%
+  pivot_longer(cols = Norm_Perch:Norm_Rudd, names_to = "Target", values_to = "Conc") %>%
+  filter(SampleType == "Sediment") %>%
+  unite(col = "IDss", c(Site, Replicate), sep = "_", remove = FALSE)
+wilcox.test(Conc~ Target, data = SS, paired = TRUE)
+#V = 162, p-value = 0.03492
+
+ggplot(SS, aes(x = Target, y = Conc)) +
+  geom_boxplot(width=0.4, size=1.2, fatten=1.25, colour=c("#DFA19F", "#A0C9CF")) +
+  geom_point(colour="grey70", size=2, alpha=0.5) +
+  geom_line(aes(group=IDss), colour="grey70", linetype="11") +
+  annotate("text", x = 1.5, y = 3000, label = "V = 162, p = 0.03", size = 5) +
+  scale_y_sqrt(breaks = c(0, 250, 500, 750, 1000, 3000)) + #labels = c(0, expression("1 x 10"^5), expression("1 x 10"^7), expression("1 x 10"^9))) +
+  scale_x_discrete(name = "Fish eDNA",
+                     labels = c("Conc.uL_Perch" = "Perch", 
+                                "Conc.uL_Rudd" = "Rudd")) +
+  #scale_y_sqrt(breaks = scales::pretty_breaks(n = 4)) +
+  labs(y = "Fish eDNA gene copy number per gram of sediment (DW)") +
+  theme_classic() + 
+  theme(text = element_text(size = 18),
+        axis.title = element_text(size = 18),
+        axis.text = element_text(size = 17),
+        legend.text = element_text(size = 18))
+
+ggsave("Paired boxplots - sediment in Waitawa.png", height = 8, width = 8)
+
+
+
+require(rstatix)
 stat.test <- data %>%
   rename(Perch = Norm_Perch,
          Rudd = Norm_Rudd) %>%
@@ -209,8 +337,6 @@ stat.test %<>% add_row(data %>%
 #And the significant differences across locations are...:
 stat.test %>% select(Lake, Target, p, SampleType)
 
-
-#long workaround for stats
 SS <- data %>% filter(Lake == "Pounui") %>%
   pivot_longer(cols = Norm_Perch:Norm_Rudd, names_to = "Target", values_to = "Conc") %>%
   filter(SampleType == "Water", Target == "Norm_Perch") %>%
@@ -240,8 +366,7 @@ wilcox_test <- tibble(Lake = c("Pounui", "Pounui"),
                            Location = rep("c(Littoral, Pelagic)", 2),
                            label = c("< 0.01", "0.01")) %>% group_by(SampleType, Location)
 
-
-#Code for final boxplot plot
+#code for final boxplot plot
 ggplot(data_long, aes(x = SampleType, y = Norm_Conc)) +
   geom_boxplot(data = data_long, mapping = aes(x = SampleType, y = Norm_Conc, fill = Location)) +
   geom_boxplot(data = subset(data_long, SampleType %in% "Water"), 
@@ -254,9 +379,9 @@ ggplot(data_long, aes(x = SampleType, y = Norm_Conc)) +
   geom_text(data = wilcox_test, mapping = aes(x = SampleType, y = 3050, label = label)) + 
   
   scale_fill_manual(labels = c("Near-shore", "Mid-lake"), values = c("#BCE123", "#23B1E1")) +
-  scale_y_continuous(trans=scales::pseudo_log_trans(base = 10), 
-                     breaks = c(0, 10, 100, 1000, 3000)) +
-
+  #scale_y_continuous(trans=scales::pseudo_log_trans(base = 10), 
+   #                  breaks = c(0, 10, 100, 1000, 3000)) +
+   scale_y_continuous(trans="sqrt") +
   #scale_y_log10() +#expand = expansion(mult = c(0, 0.1))) +
   facet_grid(Lake ~ Target, drop = TRUE) + #, scales = "free") + 
   labs(x = NULL, y = "Target gene levels (gene copy numbers per gram)") +
@@ -276,21 +401,69 @@ ggplot(data_long, aes(x = SampleType, y = Norm_Conc)) +
 
 
 ggsave("Figure 2 final.png", width = 10, height = 11)
+
+
+
+
+```
+
+
+
+```{r Supplementary boxplot}
+ggplot(data_long, aes(x = SampleType, y = Raw_Conc, fill = Location)) +
+  geom_boxplot() +
+  scale_fill_manual(labels = c("Near-shore", "Mid-lake"), values = c("#BCE123", "#23B1E1")) +
+  #scale_y_continuous(trans=scales::pseudo_log_trans(base = 10)) + #, 
+                     #breaks = c(0, 10, 100, 1000, 3000)) +
+  scale_y_continuous(trans="sqrt", 
+                     breaks = c(0, 1, 2, 3, 4, 5, 6)) + #,
+  facet_grid(Lake ~ Target, drop = TRUE) + #, scales = "free") + 
+  labs(x = NULL, y = "Target gene levels (gene copy numbers per microliter)") +
+  theme_bw() +
+  #stat_compare_means(method = "anova", label.y = 1)+      # Add global p-value
+  #stat_compare_means(label = "p.signif", method = "t.test", hide.ns = TRUE)  +
+  theme(panel.grid.minor = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 15),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 12),
+        legend.position = "bottom",
+        strip.text = element_text(size = 15),
+        strip.placement = "outside",
+        strip.background = element_blank())
+
+
+
+
+ggsave("Figure S1.png", width = 10, height = 11)
 ```
 
 
 ```{r Binary detection}
 SS <- data %>%
   filter(Binary_Perch_ddPCR >0) %>%
+  distinct(Sample.ID, Site, Lake)
+
+dim(SS) #88 samples with Perch eDNA
+
+SS <- data %>%
+  filter(Binary_Perch_ddPCR >0) %>%
   distinct(Site, Lake)
 
-dim(SS) #88 samples with Perch
+dim(SS) #29 sites with Perch eDNA
+
+SS <- data %>%
+  filter(Binary_Rudd_ddPCR >0) %>%
+  distinct(Sample.ID,Site, Lake)
+
+dim(SS) #46 samples with Rudd eDNA
 
 SS <- data %>%
   filter(Binary_Rudd_ddPCR >0) %>%
   distinct(Site, Lake)
 
-dim(SS) #46 samples with Rudd
+dim(SS) #21 sites with Rudd eDNA
+
 
 
 #Min and Max concentrations of perch eDNA in sediment
@@ -336,36 +509,6 @@ SS <- data %>%
   summarise(Rudd = sum(Binary_Rudd_ddPCR)) %>%
   pivot_wider(names_from = SampleType, values_from = Rudd) %>%
   filter(Sediment >0 & Water > 0)
-
-#Detections per zone
-SS <- data %>%
-  select(!ID.Counts) %>%
-  group_by(Lake, Location, SampleType) %>%
-  summarise(Perch = sum(Binary_Perch_ddPCR)) %>% 
-  pivot_wider(names_from = Location, values_from = Perch)
-
-kruskal.test(log10(Norm_Perch+1) ~ as.factor(Location), data = data %>%
-  drop_na(Norm_Perch))
-#Kruskal-Wallis chi-squared = 3.2774, df = 1, p-value = 0.07024
-
-
-SS <- data %>% filter(Lake=="Pounui")
-kruskal.test(log10(Norm_Perch+1) ~ as.factor(Location), data = SS %>%
-  drop_na(Norm_Perch))
-#Kruskal-Wallis chi-squared = 6.9856, df = 1, p-value = 0.008217
-
-SS <- data %>%
-  select(!ID.Counts) %>%
-  group_by(Lake, Location, SampleType) %>%
-  summarise(Rudd = sum(Binary_Rudd_ddPCR)) %>% 
-  pivot_wider(names_from = Location, values_from = Rudd)
-
-kruskal.test(log10(Norm_Rudd+1) ~ as.factor(Location), data = data %>%
-  drop_na(Norm_Rudd))
-#Kruskal-Wallis chi-squared = 0.24673, df = 1, p-value = 0.6194
-
-
-
 
 
 
@@ -440,7 +583,7 @@ ggplot(., aes(SampleType, as.factor(Site), fill= as.factor(Sum_R))) +
 
 
 ggarrange(P, R, ncol = 1, labels = c("A.", "B."))
-ggsave('Figure 3 Heatmap final.png', device = 'png', width = 12, height = 10)
+ggsave('Figure 3.2 Heatmap.png', device = 'png', width = 12, height = 10)
 ```
 
 
@@ -499,9 +642,9 @@ ggdensity(log10(data$Norm_Perch), main = "Density plot of Cyano concentration, l
 ##################
 require(lawstat)
 data %>% filter(Lake == "Pounui",
-                 SampleType == "Sediment") %>%
-
+                SampleType == "Sediment") %>%
 shapiro.test(log10(.$Norm_Perch+1)) #W = 0.52948, p-value < 2.2e-16
+
 levene.test(log10(data$Norm+1), data$Lake)#Test Statistic = 24.192, p-value = 2.394e-06
 
 
@@ -540,6 +683,33 @@ kruskal.test(log10(Norm_Rudd+1) ~ as.factor(SampleType), data = data %>%
 #Kruskal-Wallis chi-squared = 7.2346, df = 1, p-value = 0.007151
 
 
+### Detections per location zone ###
+SS <- data %>%
+  select(!ID.Counts) %>%
+  group_by(Lake, Location, SampleType) %>%
+  summarise(Perch = sum(Binary_Perch_ddPCR)) %>% 
+  pivot_wider(names_from = Location, values_from = Perch)
+
+#For all lakes
+kruskal.test(log10(Norm_Perch+1) ~ as.factor(Location), data = data %>%
+  drop_na(Norm_Perch))
+#Kruskal-Wallis chi-squared = 3.2774, df = 1, p-value = 0.07024
+
+#For Pounui
+SS <- data %>% filter(Lake=="Pounui")
+kruskal.test(log10(Norm_Perch+1) ~ as.factor(Location), data = SS %>%
+  drop_na(Norm_Perch))
+#Kruskal-Wallis chi-squared = 6.9856, df = 1, p-value = 0.008217
+
+SS <- data %>%
+  select(!ID.Counts) %>%
+  group_by(Lake, Location, SampleType) %>%
+  summarise(Rudd = sum(Binary_Rudd_ddPCR)) %>% 
+  pivot_wider(names_from = Location, values_from = Rudd)
+
+kruskal.test(log10(Norm_Rudd+1) ~ as.factor(Location), data = data %>%
+  drop_na(Norm_Rudd))
+#Kruskal-Wallis chi-squared = 0.24673, df = 1, p-value = 0.6194
 
 
 #Is there a difference in levels per lake?
@@ -547,12 +717,17 @@ kruskal.test(log10(Norm_Rudd+1) ~ as.factor(SampleType), data = data %>%
 Tomarata2 <- data %>% filter(Lake=="Tomarata")
 kruskal.test(log10(Norm_Rudd+1) ~ as.factor(SampleType), data = Tomarata2 %>%
   drop_na(Norm_Rudd))
-#Kruskal-Wallis chi-squared = 3.3136, df = 1, p-value = 0.06871
+#Kruskal-Wallis chi-squared = 3.3136, df = 1, p-value = 0.09502
 
 #Waitawa
+Waitawa2 <- data %>% filter(Lake=="Waitawa")
 kruskal.test(log10(Norm_Rudd+1) ~ as.factor(SampleType), data = Waitawa2 %>%
   drop_na(Norm_Rudd))
-#Kruskal-Wallis chi-squared = 34.834, df = 1, p-value = 3.59e-09
+#Kruskal-Wallis chi-squared = 34.834, df = 1, p-value = 0.505
+
+
+
+
 
 
 #stats per site - need to average eDNA conc
@@ -567,8 +742,8 @@ data_avg_Perch <- data %>%
   mutate(MeanConc.Perch = mean(Norm_Perch),
          MeanConc.Rudd = mean(Norm_Rudd)) %>%
   unite(col = "SiteID", c(Lake, SampleType, Site), sep = "_", remove = FALSE) %>%
-  distinct(SiteID, .keep_all = TRUE) %>%
-  pivot_wider()
+  distinct(SiteID, .keep_all = TRUE)# %>%
+  #pivot_wider()
 
 
 data_avg_Rudd <- data %>%
@@ -576,19 +751,27 @@ data_avg_Rudd <- data %>%
   mutate(MeanConc.Perch = mean(Norm_Perch),
          MeanConc.Rudd = mean(Norm_Rudd)) %>%
   unite(col = "SiteID", c(Lake, SampleType, Site), sep = "_", remove = FALSE) %>%
-  distinct(SiteID, .keep_all = TRUE) %>%
-  pivot_wider()
+  distinct(SiteID, .keep_all = TRUE) #%>%
+  #pivot_wider()
 
 #How many sites with detection
 #Widen df to avoid sample type repetition
+data_avg <- data %>%
+  group_by(Lake, Site, SampleType) %>%
+  mutate(MeanConc.Perch = mean(Conc.uL_Perch),
+         MeanConc.Rudd = mean(Conc.uL_Rudd)) %>%
+  unite(col = "SiteID", c(Lake, SampleType, Site), sep = "_", remove = FALSE) %>%
+  distinct(SiteID, .keep_all = TRUE)
+
+
 data_avg %>% filter(MeanConc.Perch >0)
 data_avg %>% filter(MeanConc.Rudd >0)
 
 #How many sites with detection depending on sampling type
-data_avg %>% filter(SampleType == "Sediment") %>% filter(MeanConc.Perch >0) #30
-data_avg %>% filter(SampleType == "Water") %>% filter(MeanConc.Perch >0) #25
-data_avg %>% filter(SampleType == "Sediment") %>% filter(MeanConc.Rudd >0) #22
-data_avg %>% filter(SampleType == "Water") %>% filter(MeanConc.Rudd >0) #18
+nrow(data_avg %>% filter(SampleType == "Sediment") %>% filter(MeanConc.Perch >0)) #27
+nrow(data_avg %>% filter(SampleType == "Water") %>% filter(MeanConc.Perch >0)) #25
+nrow(data_avg %>% filter(SampleType == "Sediment") %>% filter(MeanConc.Rudd >0)) #16
+nrow(data_avg %>% filter(SampleType == "Water") %>% filter(MeanConc.Rudd >0)) #16
 
 #Sites in common across samples types?
 data_avg %>% group_by(Lake, Site) %>% transmute(Lake = Lake, Site = Site, Detection = sum(MeanConc.Perch>0)) %>% filter(Detection >1)
@@ -596,17 +779,15 @@ data_avg %>% group_by(Lake, Site) %>% transmute(Lake = Lake, Site = Site, Detect
 
 SS <- data_avg %>% group_by(Lake, Site) %>% mutate(Detection = sum(MeanConc.Perch>0)) %>% filter(Detection >1)
 
-
-
 SS <- data_avg %>% select(!c(`ï..Well`, ddPCR_Run_ID,ID, SiteID, ddPCR_Run, Replicate)) %>% pivot_wider(names_from = SampleType, values_from = c(MeanConc.Perch, MeanConc.Rudd))
-#%>% filter(MeanConc.Perch >0) %>% summarise
-data_avg %>% filter(MeanConc.Rudd >0)
-  
-
-
 ```
 
-Occupancy modelling was performed outside of R, using the PRESENCE software (https://www.mbr-pwrc.usgs.gov/software/presence.html)
+
+Binary data was used in the software Presence (https://www.mbr-pwrc.usgs.gov/software/presence.html) to determine which sample type and location was best for sampling each fish's eDNA in each lake (occupancy modelling). There is no code for this part of the analysis, see the paper for more details and contact the authors if you would like to know more.
+
+
+A homemade formula is then used to design how many sites and replicates (minimum) it would be meaningful to sample, depending on the best eDNA probability detection.
+Design simulation formula below:
 
 
 
@@ -783,11 +964,36 @@ plotMLEdist <- function(mydist, p, psi)
 
 Running the simulations, where psi = psi (large-scale occupancy), p = fish eDNA detection probability, s = number of sites, k = number of replicates.
 
-```{r Simulation for worse-case fish detection probability}
-myres<-evaldesign(psi=1,p=0.21,s=4,k=4,nits=10000,doprint=1,doplot=1)
+First, we find the minimum meaningful number of sites for our study lakes (best results for Pounui and Waitawa (value in bold in Table 3), and the "worst case detection scenario" represented by Lake Tomarata (the detection probabilities for both sample types).
 
+
+
+```{r Simulation for worse-case fish detection probability (Lake Tomarata)}
+#Probability detection for Lake Tomarata / sediment samples: p=0.21
+#The number of sites (s) and replicates (k) was adjusted until psi MSE <0.05 and empty histories = 0%
+myres<-evaldesign(psi=1,p=0.21,s=6,k=5,nits=10000,doprint=1,doplot=1)
+
+#Probability detection for Lake Tomarata / water samples: p=0.07
+#The number of sites (s) and replicates (k) was adjusted until psi MSE <0.05 and empty histories = 0%
 myres<-evaldesign(psi=1,p=0.07,s=20,k=8,nits=10000,doprint=1,doplot=1)
 ```
+
+
+
+```{r Simulation for Lake Pounui and Lake Waitawa }
+#Best probability detection for perch eDNA Lake Pounui: p = 0.99 (sediment samples)
+#But the simulations can only calculate p=<0.97, so we ran the simulations at 0.97
+myres<-evaldesign(psi=1,p=0.97,s=2,k=2,nits=10000,doprint=1,doplot=1)
+#we selected 2 sites and 2 replicates because occupancy modelling needs replication (>1 item)
+
+#Best probability detection for perch eDNA in Lake Waitawa : p = 0.89
+myres<-evaldesign(psi=1,p=0.89,s=2,k=2,nits=10000,doprint=1,doplot=1)
+#Best probability detection for perch eDNA in Lake Waitawa : p = 0.93
+myres<-evaldesign(psi=1,p=0.93,s=2,k=2,nits=10000,doprint=1,doplot=1)
+```
+
+
+Then we investigate the number of sites needed for a range of detection probabilities and replicates, to build Figure 4 (see paper).
 
 ```{r Plotting simulation trends}
 #How many minimum meaningful sites (s) for a range of detection probabilities (p) if 2 replicates (k), psi = 1, empty histories = 0%, and error <0.5%
@@ -833,10 +1039,18 @@ sim_data <- data.frame(Detect.Prob=c(0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.25, 0.
                   Four = c(2,2,2,2,3,4,6,7,10,16,40)) %>%
   pivot_longer(cols= Two:Four, names_to = "ReplicateN", values_to = "SiteN")
 
-ggplot(data = sim_data, aes(x = Detect.Prob, y = SiteN, color = ReplicateN, shape=ReplicateN))+
-  geom_point(size = 2.5) +
-  stat_smooth(se = FALSE) +
-  scale_color_manual(name = "Number of replicates", values = c("#6195ED", "#DA4489", "#DAA944")) +
+sim_data$ReplicateN <- factor(sim_data$ReplicateN, levels = c("Two", "Three", "Four"))
+
+glimpse(sim_data)
+
+ggplot()+
+  geom_point(data = sim_data, aes(x = Detect.Prob, y = SiteN, color = ReplicateN, shape=ReplicateN), size = 2.5) +
+  geom_line(data = sim_data, aes(x = Detect.Prob, y = SiteN, color = ReplicateN, shape=ReplicateN)) +
+  #stat_smooth(se = FALSE) +
+  #stars to represent the results of our study lakes - from the simulations in the previous chunk of code
+  geom_star(aes(x = c(0.89, 0.93, 0.99), y = 2), starshape=1, fill= "#F6D13C", color = "#D1AA0A", size=4) +
+  geom_star(aes(x = c(0.07, 0.21), y = c(20, 6)), starshape=1, fill= "#F6D13C", color = "#D1AA0A", size=4) +
+  scale_color_manual(name = "Number of replicates", values = c("#92DA10", "#DA4489", "#6195ED")) +#  "#DAA944")) +
   scale_shape_manual(name = "Number of replicates",
                      #labels = c("Control, Non-F", "Control, Flwr", "Exclosure, Non-F", "Exclosure, Flwr"),
                      values = c(15,16,17)) +
@@ -848,10 +1062,8 @@ ggplot(data = sim_data, aes(x = Detect.Prob, y = SiteN, color = ReplicateN, shap
         legend.text = element_text(size = 18))
   
 
-ggsave("Figure 4 final.png", height = 8, width = 12)
-
+ggsave("Figure 4.png", height = 8, width = 12)
 ```
-
 
 
 
