@@ -1,4 +1,7 @@
-# PhD
-Some R scripts created for my data chapters during my PhD. The papers are mentioned (+URL) at the beginning of each script when published.
+# Spatial survey of exotic fish using eDNA
+
+Here are is the R markdown detailing how I analysed the results in "Optimal sample type and number vary in small shallow lakes when targeting non-native fish environmental DNA ".
+
+Any questions please contact me through GitHub!
 
 
