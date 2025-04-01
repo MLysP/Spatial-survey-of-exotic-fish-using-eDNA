@@ -10,7 +10,7 @@ output: html_document
 
 Goals:
  + Compare detection between surface sediment and surface water samples
- +     “		                 near-shore and mid-lake sites
+ + Compare detection between near-shore and mid-lake sites
  + Will detection change depending on the fish species (rudd = benthic vs perch = pelagic)?
  + How many sites/replicates needed per lake to reliably detect fish eDNA?
 
